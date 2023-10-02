@@ -10,7 +10,20 @@
 
 # 結果
 
-![第2回の結果](???.png)
+[第2回の結果]
+
+Unlitシェーダ 輪郭
+
+![輪郭](https://github.com/Ryouta32/PGWS4/assets/90999621/223b3c2b-296b-4ea9-955a-9d3623eb94b8)!
+
+Unlitシェーダ 法線マップ
+
+![法線マップ](https://github.com/Ryouta32/PGWS4/assets/90999621/a28cffbc-7144-4b5f-b02d-894b39267fc6)!
+
+シェーダーグラフ
+
+![シェーダーグラフ](https://github.com/Ryouta32/PGWS4/assets/90999621/e7195fa2-f979-4034-8700-00cc2d32a97c)!
+
 
 ![第3回の結果](???.png)
 

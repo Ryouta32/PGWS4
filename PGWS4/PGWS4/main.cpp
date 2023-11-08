@@ -25,6 +25,17 @@ void DebugOutputFormatString(const char* format, ...) {
 }
 
 #ifdef _DEBUG
+
+void EnableDebugLayer() {
+	ID3D12Debug* debugLayer = nullptr;
+	HRESULT result = D3D12GetDebugInterface(IID_PPV_ARGS(&debugLayer));
+
+	if (!SUCCEEDED(result))return;
+
+	debugLayer->EnableDebugLayer();//デバッグプレイヤーを有効化する
+	debugLayer->Release();//有効化したらインターフェイスを開放する
+}
+
 //面倒だけど書かなきゃいけない
 LRESULT WindowProcedure(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
 	//ウィンドウが破棄されたら呼ばれる
@@ -77,21 +88,29 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 		w.hInstance,//呼び出しアプリケーションバンドル
 		nullptr);
 
-	HRESULT D3D12CreateDevice(
-		IUnknown * pAdapter,//自動でグラフィックドライバを選択
-		D3D_FEATURE_LEVEL MinimumFeatureLevel,//最低限必要なフィーチャーレベル
-		REFIID riid,//受け取りたいオブジェクトの肩を識別するためのID
-		void** ppDevice
-	);
+	float collarG = 0;
+	float G=0.02;
 
-	HRESULT CreateSwapChainForHwnd(
-		IUnknown * pDevice,//コマンドキューオブジェクト
-		HWND hWnd,//ウィンドウハンドル
-		const DXGI_SWAP_CHAIN_DESC1 * pDesc,//スワップチェーン設定
-		const DXGI_SWAP_CHAIN_FULLSCREEN_DESC * pFullscreenDesc,//とりあえずnullでok
-		IDXGIOutput * pRestricToOutput,//これもnull
-		IDXGISwapChain1 * *ppSwapChain
-	);
+	//HRESULT D3D12CreateDevice(
+	//	IUnknown * pAdapter,//自動でグラフィックドライバを選択
+	//	D3D_FEATURE_LEVEL MinimumFeatureLevel,//最低限必要なフィーチャーレベル
+	//	REFIID riid,//受け取りたいオブジェクトの肩を識別するためのID
+	//	void** ppDevice
+	//);
+
+	//HRESULT CreateSwapChainForHwnd(
+	//	IUnknown * pDevice,//コマンドキューオブジェクト
+	//	HWND hWnd,//ウィンドウハンドル
+	//	const DXGI_SWAP_CHAIN_DESC1 * pDesc,//スワップチェーン設定
+	//	const DXGI_SWAP_CHAIN_FULLSCREEN_DESC * pFullscreenDesc,//とりあえずnullでok
+	//	IDXGIOutput * pRestricToOutput,//これもnull
+	//	IDXGISwapChain1 * *ppSwapChain
+	//);
+
+#ifdef  _DEBUG
+	//デバッグレイヤーをオンに
+	EnableDebugLayer();
+#endif // ! _DEBUG
 
 	D3D_FEATURE_LEVEL levels[] = {
 		D3D_FEATURE_LEVEL_12_1,
@@ -99,8 +118,12 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 		D3D_FEATURE_LEVEL_11_1,
 		D3D_FEATURE_LEVEL_11_0,
 	};
+#ifdef _DEBUG
+	auto result = CreateDXGIFactory2(DXGI_CREATE_FACTORY_DEBUG, IID_PPV_ARGS(&_dxgiFactory));
+#else
 	auto result = CreateDXGIFactory1(IID_PPV_ARGS(&_dxgiFactory));
-	
+#endif // !_DEBUG
+
 	//アダプターの列挙用
 	std::vector<IDXGIAdapter*>adapters;
 	IDXGIAdapter* tmpAdapter = nullptr;
@@ -191,6 +214,11 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 		_dev->CreateRenderTargetView(_backBuffers[idx], nullptr, handle);
 	}
 
+	ID3D12Fence* _fence = nullptr;
+	UINT64 _fenceVal = 0;
+	result = _dev->CreateFence(_fenceVal, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&_fence));
+
+	//ウィンドウ表示
 	ShowWindow(hwnd, SW_SHOW);
 
 
@@ -199,6 +227,55 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 		MSG msg;
 		if(PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)){
 
+			//バックパックバッファのインデックスを所得
+			auto bbIdx = _swapchain->GetCurrentBackBufferIndex();
+
+			D3D12_RESOURCE_BARRIER BarrierDesc = {};
+			BarrierDesc.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;//遷移
+			BarrierDesc.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+			BarrierDesc.Transition.pResource = _backBuffers[bbIdx];//バックバッファリソース
+			BarrierDesc.Transition.Subresource = 0;
+			BarrierDesc.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;//直前はPRESENT状態
+			BarrierDesc.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;//今からRT状態
+			_cmdList->ResourceBarrier(1, &BarrierDesc);
+			//レンダーターゲットを指定
+			auto rtvH = rtvHeaps->GetCPUDescriptorHandleForHeapStart();
+			rtvH.ptr += bbIdx * _dev->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+			_cmdList->OMSetRenderTargets(1, &rtvH, true, nullptr);
+
+			if (collarG > 1 || collarG < 0)G *= -1;
+			collarG += G;
+
+			//画面クリア
+			float clearColor[] = { 0.5f,collarG,0.5f };
+			_cmdList->ClearRenderTargetView(rtvH, clearColor, 0, nullptr);
+			
+			//前後だけ入れ替える
+			BarrierDesc.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+			BarrierDesc.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
+			_cmdList->ResourceBarrier(1, &BarrierDesc);
+			//命令のクローズ
+			_cmdList->Close();
+
+			//コマンドリストの実行
+			ID3D12CommandList* cmdlists[] = { _cmdList };
+			_cmdQueue->ExecuteCommandLists(1, cmdlists);
+
+			//待ち
+			_cmdQueue->Signal(_fence, ++_fenceVal);
+			if (_fence->GetCompletedValue() != _fenceVal) {
+				auto event =CreateEvent(nullptr,false,false,nullptr);
+				_fence->SetEventOnCompletion(_fenceVal, event);//イベントハンドルの所得
+				WaitForSingleObject(event, INFINITE);//イベントが発生するまで待つ
+				CloseHandle(event);//イベントハンドルを閉じる
+			}
+
+			_cmdAllocator->Reset();//キューをクリア
+			_cmdList->Reset(_cmdAllocator, nullptr);//再びコマンドリストを貯める準備
+
+			//フリップ
+			_swapchain->Present(1, 0);
+			
 			//アプリが終わるときにmessageがWM＿QUITになる
 			if (msg.message == WM_QUIT) {
 				break;
